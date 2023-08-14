@@ -1,68 +1,34 @@
-package usecase
+package validator
 
 import (
 	"go-rest-api/model"
-	"go-rest-api/repository"
-	"go-rest-api/validator"
-	"os"
-	"time"
 
-	"github.com/golang-jwt/jwt/v4"
-	"golang.org/x/crypto/bcrypt"
+	validation "github.com/go-ozzo/ozzo-validation/v4"
+	"github.com/go-ozzo/ozzo-validation/v4/is"
 )
 
-type IUserUsecase interface {
-	SignUp(user model.User) (model.UserResponse, error)
-	Login(user model.User) (string, error)
+type IUserValidator interface {
+	UserValidate(user model.User) error
 }
 
-type userUsecase struct {
-	ur repository.IUserRepository
-	uv validator.IUserValidator
+type userValidator struct{}
+
+func NewUserValidator() IUserValidator {
+	return &userValidator{}
 }
 
-func NewUserUsecase(ur repository.IUserRepository, uv validator.IUserValidator) IUserUsecase {
-	return &userUsecase{ur, uv}
-}
-
-func (uu *userUsecase) SignUp(user model.User) (model.UserResponse, error) {
-	if err := uu.uv.UserValidate(user); err != nil {
-		return model.UserResponse{}, err
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), 10)
-	if err != nil {
-		return model.UserResponse{}, err
-	}
-	newUser := model.User{Email: user.Email, Password: string(hash)}
-	if err := uu.ur.CreateUser(&newUser); err != nil {
-		return model.UserResponse{}, err
-	}
-	resUser := model.UserResponse{
-		ID:    newUser.ID,
-		Email: newUser.Email,
-	}
-	return resUser, nil
-}
-
-func (uu *userUsecase) Login(user model.User) (string, error) {
-	if err := uu.uv.UserValidate(user); err != nil {
-		return "", err
-	}
-	storedUser := model.User{}
-	if err := uu.ur.GetUserByEmail(&storedUser, user.Email); err != nil {
-		return "", err
-	}
-	err := bcrypt.CompareHashAndPassword([]byte(storedUser.Password), []byte(user.Password))
-	if err != nil {
-		return "", err
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": storedUser.ID,
-		"exp":     time.Now().Add(time.Hour * 12).Unix(),
-	})
-	tokenString, err := token.SignedString([]byte(os.Getenv("SECRET")))
-	if err != nil {
-		return "", err
-	}
-	return tokenString, nil
+func (uv *userValidator) UserValidate(user model.User) error {
+	return validation.ValidateStruct(&user,
+		validation.Field(
+			&user.Email,
+			validation.Required.Error("email is required"),
+			validation.RuneLength(1, 30).Error("limited max 30 char"),
+			is.Email.Error("is not valid email format"),
+		),
+		validation.Field(
+			&user.Password,
+			validation.Required.Error("password is required"),
+			validation.RuneLength(6, 30).Error("limited min 6 max 30 char"),
+		),
+	)
 }
